@@ -509,11 +509,21 @@ function loadSheets() {
   var se = document.getElementById("sheets-error");
   var ss = document.getElementById("sheets-spinner");
   var sm = document.getElementById("sheets-main");
+
+  // Se os elementos não existem ainda, tenta novamente em 500ms
+  if (!se || !ss || !sm) {
+    setTimeout(loadSheets, 500);
+    return;
+  }
+
   se.style.display = "none";
   ss.style.display = "flex";
   sm.style.display = "none";
 
-  fetch(SHEETS_URL)
+  var csvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTkggoAjBj1JKl_Pcl7WbmS8Q_glnXvVGvZfiBhBaiDrIMqKh04m6Mr7a6292fUo0K2y573y_3AQw0U/pub?gid=0&single=true&output=csv";
+  var fetchUrl = WORKER + "/graph?path=/sheets&url=" + encodeURIComponent(csvUrl);
+
+  fetch(fetchUrl)
     .then(function(r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.text();
@@ -524,6 +534,7 @@ function loadSheets() {
       if (lines.length < 2) throw new Error("Planilha vazia.");
 
       var header = lines[0].split(",").map(function(h){ return h.trim().replace(/"/g,"").toUpperCase(); });
+      console.log("Headers:", header);
 
       var idx = {
         dtAg:    header.findIndex(function(h){ return h.includes("DATA DO AGENDAMENTO"); }),
@@ -532,16 +543,12 @@ function loadSheets() {
         comprou: header.findIndex(function(h){ return h.includes("COMPROU"); }),
         valor:   header.findIndex(function(h){ return h.includes("VALOR"); }),
       };
-
-      // Mostra quais colunas foram encontradas no console
-      console.log("Colunas encontradas:", header);
-      console.log("Índices:", idx);
+      console.log("Indices:", idx);
 
       sheetsData = [];
       for (var i=1; i<lines.length; i++) {
         var line = lines[i];
-        var cols = [];
-        var cur = "", inQ = false;
+        var cols = [], cur = "", inQ = false;
         for (var j=0; j<line.length; j++) {
           var ch = line[j];
           if (ch==='"') { inQ=!inQ; }
@@ -566,14 +573,13 @@ function loadSheets() {
         });
       }
 
-      console.log("Total de linhas lidas:", sheetsData.length);
+      console.log("Linhas lidas:", sheetsData.length);
       renderSheets();
       sm.style.display = "block";
     })
     .catch(function(e) {
-      ss.style.display = "none";
-      se.textContent = "Erro ao carregar planilha: " + e.message;
-      se.style.display = "block";
+      if (ss) ss.style.display = "none";
+      if (se) { se.textContent = "Erro planilha: " + e.message; se.style.display = "block"; }
       console.error("Sheets error:", e);
     });
 }
