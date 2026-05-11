@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -392,22 +393,23 @@ function parseDate(str){
 function fmtDate(dt){if(!dt)return"—";return String(dt.getDate()).padStart(2,"0")+"/"+String(dt.getMonth()+1).padStart(2,"0")+"/"+dt.getFullYear();}
 function isSameDay(a,b){return a&&b&&a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();}
 
-function filterRows(rows){
-  var hoje=new Date();hoje.setHours(0,0,0,0);
-  var ontem=new Date(hoje);ontem.setDate(ontem.getDate()-1);
-  var d7=new Date(hoje);d7.setDate(d7.getDate()-6);
-  var d30=new Date(hoje);d30.setDate(d30.getDate()-29);
+function inPeriod(dt, filter) {
+  if (!dt) return false;
+  var d = new Date(dt); d.setHours(0,0,0,0);
+  var hoje=new Date(); hoje.setHours(0,0,0,0);
+  var ontem=new Date(hoje); ontem.setDate(ontem.getDate()-1);
+  var d7=new Date(hoje); d7.setDate(d7.getDate()-6);
+  var d30=new Date(hoje); d30.setDate(d30.getDate()-29);
   var mesInicio=new Date(hoje.getFullYear(),hoje.getMonth(),1);
-  return rows.filter(function(r){
-    var dtAg=new Date(r.dtAgendamento);dtAg.setHours(0,0,0,0);
-    if(sheetsFilter==="hoje") return isSameDay(dtAg,hoje);
-    if(sheetsFilter==="ontem") return isSameDay(dtAg,ontem);
-    if(sheetsFilter==="7d") return dtAg>=d7;
-    if(sheetsFilter==="30d") return dtAg>=d30;
-    if(sheetsFilter==="mes") return dtAg>=mesInicio;
-    return true;
-  });
+  if(filter==="hoje")  return isSameDay(d,hoje);
+  if(filter==="ontem") return isSameDay(d,ontem);
+  if(filter==="7d")    return d>=d7;
+  if(filter==="30d")   return d>=d30;
+  if(filter==="mes")   return d>=mesInicio;
+  return true;
 }
+
+function filterRows(rows){ return rows.filter(function(r){ return inPeriod(r.dtAgendamento, sheetsFilter); }); }
 
 function loadSheets(){
   var se=document.getElementById("sheets-error");
@@ -470,41 +472,54 @@ function loadSheets(){
 }
 
 function renderSheets(){
-  var rows=filterRows(sheetsData);
-  var totalAgend=rows.length;
-  var totalConsult=rows.filter(function(r){return r.dtConsulta;}).length;
-  var totalCompar=rows.filter(function(r){return r.compareceu;}).length;
-  var totalVendas=rows.filter(function(r){return r.comprou;}).length;
-  var totalFatur=rows.reduce(function(s,r){return s+r.valor;},0);
-  var txCompar=totalConsult>0?Math.round(totalCompar/totalConsult*100):0;
-  var txVenda=totalCompar>0?Math.round(totalVendas/totalCompar*100):0;
-  document.getElementById("sh-agend").textContent=totalAgend;
-  document.getElementById("sh-agend-sub").textContent="agendamentos no período";
-  document.getElementById("sh-consult").textContent=totalConsult;
-  document.getElementById("sh-consult-sub").textContent="consultas marcadas";
-  document.getElementById("sh-compar").textContent=totalCompar+" ("+txCompar+"%)";
-  document.getElementById("sh-compar-sub").textContent="taxa de comparecimento";
-  document.getElementById("sh-vendas").textContent=totalVendas+" ("+txVenda+"%)";
-  document.getElementById("sh-vendas-sub").textContent="conv. sobre comparecimentos";
-  document.getElementById("sh-fatur").textContent=fmtBRL(totalFatur);
-  document.getElementById("sh-fatur-sub").textContent=totalVendas>0?"ticket médio "+fmtBRL(totalFatur/totalVendas):"";
+  // Agendamentos = DATA DO AGENDAMENTO no período
+  var rowsAgend = sheetsData.filter(function(r){ return inPeriod(r.dtAgendamento, sheetsFilter); });
+  // Consultas = DATA DA CONSULTA no período
+  var rowsConsult = sheetsData.filter(function(r){ return inPeriod(r.dtConsulta, sheetsFilter); });
+  // Comparecimentos = DATA DA CONSULTA no período E COMPARECEU = SIM
+  var rowsCompar = rowsConsult.filter(function(r){ return r.compareceu; });
+  // Vendas = comprou = SIM (dentro do período da consulta)
+  var rowsVendas = rowsConsult.filter(function(r){ return r.comprou; });
+  var totalFatur = rowsVendas.reduce(function(s,r){ return s+r.valor; }, 0);
+
+  var txCompar = rowsConsult.length>0 ? Math.round(rowsCompar.length/rowsConsult.length*100) : 0;
+  var txVenda  = rowsCompar.length>0  ? Math.round(rowsVendas.length/rowsCompar.length*100)  : 0;
+
+  document.getElementById("sh-agend").textContent   = rowsAgend.length;
+  document.getElementById("sh-agend-sub").textContent = "agendamentos no período";
+  document.getElementById("sh-consult").textContent  = rowsConsult.length;
+  document.getElementById("sh-consult-sub").textContent = "consultas no período";
+  document.getElementById("sh-compar").textContent   = rowsCompar.length+" ("+txCompar+"%)";
+  document.getElementById("sh-compar-sub").textContent = "taxa de comparecimento";
+  document.getElementById("sh-vendas").textContent   = rowsVendas.length+" ("+txVenda+"%)";
+  document.getElementById("sh-vendas-sub").textContent = "conv. sobre comparecimentos";
+  document.getElementById("sh-fatur").textContent    = fmtBRL(totalFatur);
+  document.getElementById("sh-fatur-sub").textContent = rowsVendas.length>0 ? "ticket médio "+fmtBRL(totalFatur/rowsVendas.length) : "";
+
+  // Tabela agrupada por data da consulta
   var byDay={};
-  rows.forEach(function(r){
-    var key=fmtDate(r.dtAgendamento);
-    if(!byDay[key])byDay[key]={dt:r.dtAgendamento,agend:0,consult:0,compar:0,vendas:0,fatur:0};
-    byDay[key].agend++;
-    if(r.dtConsulta)byDay[key].consult++;
-    if(r.compareceu)byDay[key].compar++;
-    if(r.comprou){byDay[key].vendas++;byDay[key].fatur+=r.valor;}
+  rowsConsult.forEach(function(r){
+    var key=fmtDate(r.dtConsulta);
+    if(!byDay[key]) byDay[key]={dt:r.dtConsulta,agend:0,consult:0,compar:0,vendas:0,fatur:0};
+    byDay[key].consult++;
+    if(r.compareceu) byDay[key].compar++;
+    if(r.comprou){ byDay[key].vendas++; byDay[key].fatur+=r.valor; }
   });
-  var days=Object.values(byDay).sort(function(a,b){return b.dt-a.dt;});
-  document.getElementById("sheets-body").innerHTML=days.length?days.map(function(d){
+  // Adiciona agendamentos do dia na tabela
+  rowsAgend.forEach(function(r){
+    var key=fmtDate(r.dtAgendamento);
+    if(!byDay[key]) byDay[key]={dt:r.dtAgendamento,agend:0,consult:0,compar:0,vendas:0,fatur:0};
+    byDay[key].agend++;
+  });
+
+  var days=Object.values(byDay).sort(function(a,b){ return b.dt-a.dt; });
+  document.getElementById("sheets-body").innerHTML = days.length ? days.map(function(d){
     var txC=d.consult>0?Math.round(d.compar/d.consult*100):0;
     var txV=d.compar>0?Math.round(d.vendas/d.compar*100):0;
     return"<tr><td>"+fmtDate(d.dt)+"</td><td>"+d.agend+"</td><td>"+d.consult+"</td>"
       +"<td>"+d.compar+"</td><td>"+txC+"%</td><td>"+d.vendas+"</td>"
       +"<td>"+fmtBRL(d.fatur)+"</td><td>"+txV+"%<span class='conv-bar' style='width:"+Math.max(4,txV)+"px'></span></td></tr>";
-  }).join(""):"<tr><td colspan='8' style='text-align:center;color:#475569;padding:20px'>Nenhum dado para o período.</td></tr>";
+  }).join("") : "<tr><td colspan='8' style='text-align:center;color:#475569;padding:20px'>Nenhum dado para o período.</td></tr>";
 }
 
 function setSheetsFilter(f,btn){
